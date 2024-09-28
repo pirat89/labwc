@@ -18,6 +18,7 @@ struct workspace {
 	struct server *server;
 
 	char *name;
+	size_t index;
 	struct wlr_scene_tree *tree;
 };
 
