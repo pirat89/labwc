@@ -14,6 +14,7 @@ struct workspace {
 	struct wl_list link; /* struct server.workspaces */
 
 	char *name;
+	size_t index;
 	struct wlr_scene_tree *tree;
 	struct wlr_scene_tree *view_trees[3];
 

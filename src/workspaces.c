@@ -27,6 +27,8 @@
 
 #define EXT_WORKSPACES_VERSION 1
 
+void expose_current_workspace(struct workspace *target);
+
 /* Internal helpers */
 static size_t
 parse_workspace_index(const char *name)
@@ -226,10 +228,11 @@ handle_ext_workspace_commit(struct wl_listener *listener, void *data)
 
 /* Internal API */
 static void
-add_workspace(const char *name)
+add_workspace(const char *name, size_t index)
 {
 	struct workspace *workspace = znew(*workspace);
 	workspace->name = xstrdup(name);
+	workspace->index = index;
 	workspace->tree = lab_wlr_scene_tree_create(server.workspace_tree);
 	workspace->view_trees[VIEW_LAYER_ALWAYS_ON_BOTTOM] =
 		lab_wlr_scene_tree_create(workspace->tree);
@@ -384,6 +387,30 @@ _osd_show(void)
 	}
 }
 
+/*
+ * Expose information about current workspace via a text file
+ *
+ * inspired by https://github.com/jenav/labwc-ws4waybar
+ */
+void
+expose_current_workspace(struct workspace *target)
+{
+	FILE *fptr;
+	const char *fname = "/tmp/labwc.workspaces";
+	fptr = fopen(fname, "w");
+	if (fptr != NULL) {
+		fprintf(fptr, "CURR_WS_NAME=%s\nCURR_WS_INDEX=%lu\n", target->name, target->index);
+		fclose(fptr);
+	} else {
+		fprintf(
+			stderr,
+			"Warning: Cannot write current workspace to %s file: Skipping",
+			fname
+		);
+	}
+}
+
+
 /* Public API */
 void
 workspaces_init(void)
@@ -401,8 +428,9 @@ workspaces_init(void)
 	wl_list_init(&server.workspaces.all);
 
 	struct workspace_config *conf;
+	uint8_t index = 1;
 	wl_list_for_each(conf, &rc.workspace_config.workspaces, link) {
-		add_workspace(conf->name);
+		add_workspace(conf->name, index++);
 	}
 
 	/*
@@ -438,6 +466,8 @@ workspaces_switch_to(struct workspace *target, bool update_focus)
 	if (target == server.workspaces.current) {
 		return;
 	}
+
+	expose_current_workspace(target);
 
 	/* Disable the old workspace */
 	wlr_scene_node_set_enabled(
@@ -567,15 +597,17 @@ workspaces_reconfigure(void)
 	struct wl_list *workspace_link = server.workspaces.all.next;
 
 	struct workspace_config *conf;
+	size_t index = 0;
 	wl_list_for_each(conf, &rc.workspace_config.workspaces, link) {
 		struct workspace *workspace = wl_container_of(
 			workspace_link, workspace, link);
 
+		index++;
 		if (workspace_link == &server.workspaces.all) {
 			/* # of configured workspaces increased */
-			wlr_log(WLR_DEBUG, "Adding workspace \"%s\"",
-				conf->name);
-			add_workspace(conf->name);
+			wlr_log(WLR_DEBUG, "Adding workspace \"%s\": %lu",
+				conf->name, index);
+			add_workspace(conf->name, index);
 			continue;
 		}
 		if (strcmp(workspace->name, conf->name)) {
