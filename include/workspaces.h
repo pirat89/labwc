@@ -19,6 +19,7 @@ struct workspace {
 	struct server *server;
 
 	char *name;
+	size_t index;
 	struct wlr_scene_tree *tree;
 
 	struct lab_cosmic_workspace *cosmic_workspace;
