@@ -54,6 +54,8 @@ enum font_place {
 
 static void load_default_key_bindings(void);
 static void load_default_mouse_bindings(void);
+static void post_sanitize_workspace_dimensions(int *, int *);
+static void post_sanitize_workspaces(void);
 
 static enum lab_window_type
 parse_window_type(const char *type)
@@ -1318,6 +1320,10 @@ entry(xmlNode *node, char *nodename, char *content)
 		xstrdup_replace(rc.workspace_config.initial_workspace_name, content);
 	} else if (!strcasecmp(nodename, "number.desktops")) {
 		rc.workspace_config.min_nr_workspaces = MAX(1, atoi(content));
+	} else if (!strcasecmp(nodename, "cols.desktops")) {
+		rc.workspace_config.cols = MAX(1, atoi(content));
+	} else if (!strcasecmp(nodename, "rows.desktops")) {
+		rc.workspace_config.rows = MAX(1, atoi(content));
 	} else if (!strcasecmp(nodename, "popupShow.resize")) {
 		if (!strcasecmp(content, "Always")) {
 			rc.resize_indicator = LAB_RESIZE_INDICATOR_ALWAYS;
@@ -1509,6 +1515,8 @@ rcxml_init(void)
 
 	rc.workspace_config.popuptime = INT_MIN;
 	rc.workspace_config.min_nr_workspaces = 1;
+	rc.workspace_config.cols = INT_MIN;
+	rc.workspace_config.rows = INT_MIN;
 
 	rc.menu_ignore_button_release_period = 250;
 	rc.menu_show_icons = true;
@@ -1683,6 +1691,104 @@ load_default_window_switcher_fields(void)
 	}
 }
 
+/*
+ * Helper functino to sanitize workspace dimension / layout.
+ *
+ * "a" is always specified, "b" is not specified
+ *
+ * See post_sanitize_workspaces for details.
+ * Here we do not need to care what is rows and cols. pointers are given by
+ * caller.
+ */
+static void
+post_sanitize_workspace_dimensions(int *a, int *b)
+{
+	if (*a >= 2) {
+        /* in this case, make it always 1-dimensional */
+		*b = 1;
+	} else {
+		*b = MAX(wl_list_length(&rc.workspace_config.workspaces), rc.workspace_config.min_nr_workspaces);
+	}
+}
+
+/*
+ * Sanitize workspaces
+ *
+ * Adding dimensions is little bit in conflict with attribute
+ * number (min_nr_workspaces) and configured named workspaces (nr_workspaces).
+ * Ex
+ *
+ * Sanitize following scenarios:
+ * * cols & rows not specified (or rows=1)
+ *   -> set rows=1, cols = max(min_nr_workspaces, nr_worspaces)
+ * * cols=1 and rows is not specified
+ *   -> rows = max(min_nr_workspaces, nr_workspaces)
+ * * cols or rows is unspecified and other one has value 2 or higher
+ *   -> the other attribute is automatically set to 1
+ * * min_nr_workspaces > rows * cols
+ *   -> decrease min_nr_workspaces; warning log
+ * * nr_workspaces > rows * cols
+ *   -> forget excessive workspaces; warning log
+ *
+ * If popuptime is not specified, set 1000
+ */
+static void
+post_sanitize_workspaces(void)
+{
+    /* sanitized dimensions in case rows or cols are not specified */
+	if (rc.workspace_config.rows == INT_MIN && rc.workspace_config.cols == INT_MIN) {
+			rc.workspace_config.rows = 1;
+			post_sanitize_workspace_dimensions(&rc.workspace_config.rows, &rc.workspace_config.cols);
+	} else if (rc.workspace_config.cols == INT_MIN) {
+			post_sanitize_workspace_dimensions(&rc.workspace_config.rows, &rc.workspace_config.cols);
+	} else if (rc.workspace_config.rows == INT_MIN) {
+			post_sanitize_workspace_dimensions(&rc.workspace_config.cols, &rc.workspace_config.rows);
+	}
+
+	/* from here consider dimensions to be the ruller */
+	int rq_nr_workspaces = rc.workspace_config.cols * rc.workspace_config.rows;
+	if (rc.workspace_config.min_nr_workspaces > rq_nr_workspaces) {
+		wlr_log(WLR_INFO, "Decreasing 'number' of workspaces to meet dimensions specified by 'rows' and 'cols'");
+		rc.workspace_config.min_nr_workspaces = rq_nr_workspaces;
+	}
+
+	int nr_workspaces = wl_list_length(&rc.workspace_config.workspaces);
+	if (nr_workspaces < rq_nr_workspaces) {
+		if (!rc.workspace_config.prefix) {
+			rc.workspace_config.prefix = xstrdup(_("Workspace"));
+		}
+		struct buf b = BUF_INIT;
+		struct workspace *workspace;
+		for (int i = nr_workspaces; i < rq_nr_workspaces; i++) {
+			workspace = znew(*workspace);
+			if (!string_null_or_empty(rc.workspace_config.prefix)) {
+				buf_add_fmt(&b, "%s ", rc.workspace_config.prefix);
+			}
+			buf_add_fmt(&b, "%d", i + 1);
+			workspace->name = xstrdup(b.data);
+			wl_list_append(&rc.workspace_config.workspaces, &workspace->link);
+			buf_clear(&b);
+		}
+		buf_reset(&b);
+	} else if (nr_workspaces > rq_nr_workspaces) {
+		struct workspace *workspace, *workspace_tmp;
+		wl_list_for_each_reverse_safe(workspace, workspace_tmp, &rc.workspace_config.workspaces, link) {
+			wl_list_remove(&workspace->link);
+			zfree(workspace->name);
+			zfree(workspace);
+			if (nr_workspaces-- <= rq_nr_workspaces) {
+				break;
+			}
+	    }
+
+	}
+
+	if (rc.workspace_config.popuptime == INT_MIN) {
+		rc.workspace_config.popuptime = 1000;
+	}
+
+}
+
 static void
 post_processing(void)
 {
@@ -1778,29 +1884,8 @@ post_processing(void)
 		}
 	}
 
-	int nr_workspaces = wl_list_length(&rc.workspace_config.workspaces);
-	if (nr_workspaces < rc.workspace_config.min_nr_workspaces) {
-		if (!rc.workspace_config.prefix) {
-			rc.workspace_config.prefix = xstrdup(_("Workspace"));
-		}
+	post_sanitize_workspaces();
 
-		struct buf b = BUF_INIT;
-		struct workspace *workspace;
-		for (int i = nr_workspaces; i < rc.workspace_config.min_nr_workspaces; i++) {
-			workspace = znew(*workspace);
-			if (!string_null_or_empty(rc.workspace_config.prefix)) {
-				buf_add_fmt(&b, "%s ", rc.workspace_config.prefix);
-			}
-			buf_add_fmt(&b, "%d", i + 1);
-			workspace->name = xstrdup(b.data);
-			wl_list_append(&rc.workspace_config.workspaces, &workspace->link);
-			buf_clear(&b);
-		}
-		buf_reset(&b);
-	}
-	if (rc.workspace_config.popuptime == INT_MIN) {
-		rc.workspace_config.popuptime = 1000;
-	}
 	if (!wl_list_length(&rc.window_switcher.osd.fields)) {
 		wlr_log(WLR_INFO, "load default window switcher fields");
 		load_default_window_switcher_fields();
