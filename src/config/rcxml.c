@@ -1809,6 +1809,7 @@ post_processing(void)
 	}
 
 	if (!rc.title_layout_loaded) {
+		wlr_log(WLR_INFO, "Load default titlebar layout");
 #if HAVE_LIBSFDO
 		fill_title_layout("icon:iconify,max,close");
 #else
