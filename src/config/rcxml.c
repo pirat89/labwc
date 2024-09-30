@@ -1658,6 +1658,7 @@ post_processing(void)
 	}
 
 	if (!rc.title_layout_loaded) {
+		wlr_log(WLR_INFO, "Load default titlebar layout");
 		fill_title_layout("menu:iconify,max,close");
 	}
 
