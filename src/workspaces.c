@@ -25,6 +25,11 @@
 #define EXT_WORKSPACES_VERSION 1
 
 void expose_current_workspace(struct workspace *target);
+static struct workspace *find_workspace_index(struct wl_list *workspaces, size_t index);
+static size_t get_left_index(size_t index, bool wrap);
+static size_t get_right_index(size_t index, bool wrap);
+static size_t get_up_index(size_t index, bool wrap);
+static size_t get_down_index(size_t index, bool wrap);
 
 /* Internal helpers */
 static size_t
@@ -271,6 +276,111 @@ get_next(struct workspace *current, struct wl_list *workspaces, bool wrap)
 	}
 	return wl_container_of(target_link, current, link);
 }
+
+/* START OF THE GRID LAYOUT NAIGATION
+ *
+ * A banner for easier backporting from upstream.
+ * The get_prev and get_next functions are dead code as for the grid layout
+ * they do not make so much sense - unless an implementation going through
+ * all workspaces is wanted (e.g. when scrolling with mouse). But they are not
+ * used at this moment. Their removal breaks diffs significantly and in this
+ * way it will be way easier to observe changes.
+ */
+static struct workspace *
+find_workspace_index(struct wl_list *workspaces, size_t target_index)
+{
+	struct workspace *target;
+	wl_list_for_each(target, workspaces, link) {
+		if (target_index == target->index) {
+			return target;
+		}
+	}
+	wlr_log(WLR_ERROR, "Workspace with index '%lu' not found", target_index);
+	return NULL;
+}
+
+static size_t
+get_left_index(size_t index, bool wrap)
+{
+	/* Convert 1-based index to 0-based for easier calculation */
+	size_t z_index = index - 1;
+	int cols = rc.workspace_config.cols;
+
+	int row = z_index / cols;
+	int col = z_index % cols;
+
+	if (col == 0 && !wrap) {
+		return index;
+	}
+
+	col = (col - 1 + cols) % cols;
+
+	/* Get the target index and convert it back to 1-based index */
+	return row * cols + col + 1;
+}
+
+static size_t
+get_right_index(size_t index, bool wrap)
+{
+	/* Convert 1-based index to 0-based for easier calculation */
+	size_t z_index = index - 1;
+	int cols = rc.workspace_config.cols;
+
+	int row = z_index / cols;
+	int col = z_index % cols;
+
+	if ((col + 1) == cols && !wrap) {
+		return index;
+	}
+
+	col = (col + 1) % cols;
+
+	/* Get the target index and convert it back to 1-based index */
+	return row * cols + col + 1;
+}
+
+static size_t
+get_up_index(size_t index, bool wrap)
+{
+	/* Convert 1-based index to 0-based for easier calculation */
+	size_t z_index = index - 1;
+	int rows = rc.workspace_config.rows;
+	int cols = rc.workspace_config.cols;
+
+	int row = z_index / cols;
+	int col = z_index % cols;
+
+	if (row == 0 && !wrap) {
+		return index;
+	}
+
+	row = (row - 1 + rows) % rows;
+
+	/* Get the target index and convert it back to 1-based index */
+	return row * cols + col + 1;
+}
+
+static size_t
+get_down_index(size_t index, bool wrap)
+{
+	/* Convert 1-based index to 0-based for easier calculation */
+	size_t z_index = index - 1;
+	int rows = rc.workspace_config.rows;
+	int cols = rc.workspace_config.cols;
+
+	int row = z_index / cols;
+	int col = z_index % cols;
+
+	if ((row + 1) == rows && !wrap) {
+		return index;
+	}
+
+	row = (row + 1) % rows;
+
+	/* Get the target index and convert it back to 1-based index */
+	return row * cols + col + 1;
+}
+/* END OF THE GRID LAYOUT NAIGATION */
 
 static bool
 workspace_has_views(struct workspace *workspace, struct server *server)
@@ -545,19 +655,19 @@ workspaces_find(struct workspace *anchor, const char *name, bool wrap)
 	struct wl_list *workspaces = &anchor->server->workspaces.all;
 
 	if (wants_index) {
-		wl_list_for_each(target, workspaces, link) {
-			if (wants_index == ++index) {
-				return target;
-			}
-		}
+		return find_workspace_index(workspaces, wants_index);
 	} else if (!strcasecmp(name, "current")) {
 		return anchor;
 	} else if (!strcasecmp(name, "last")) {
 		return anchor->server->workspaces.last;
 	} else if (!strcasecmp(name, "left")) {
-		return get_prev(anchor, workspaces, wrap);
+		return find_workspace_index(workspaces, get_left_index(anchor->index, wrap));
 	} else if (!strcasecmp(name, "right")) {
-		return get_next(anchor, workspaces, wrap);
+		return find_workspace_index(workspaces, get_right_index(anchor->index, wrap));
+	} else if (!strcasecmp(name, "up")) {
+		return find_workspace_index(workspaces, get_up_index(anchor->index, wrap));
+	} else if (!strcasecmp(name, "down")) {
+		return find_workspace_index(workspaces, get_down_index(anchor->index, wrap));
 	} else if (!strcasecmp(name, "left-occupied")) {
 		return get_prev_occupied(anchor, workspaces, wrap);
 	} else if (!strcasecmp(name, "right-occupied")) {
