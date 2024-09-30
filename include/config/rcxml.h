@@ -159,6 +159,8 @@ struct rcxml {
 	struct {
 		int popuptime;
 		int min_nr_workspaces;
+		int cols;
+		int rows;
 		char *prefix;
 		struct wl_list workspaces;  /* struct workspace.link */
 	} workspace_config;
