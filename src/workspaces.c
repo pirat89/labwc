@@ -445,7 +445,7 @@ workspaces_switch_to(struct workspace *target, bool update_focus)
 	 */
 	if (update_focus) {
 		struct view *view = server->active_view;
-		if (!view || !view_is_always_on_top(view)) {
+		if (!view || (view->workspace != target && !view_is_always_on_top(view))) {
 			desktop_focus_topmost_view(server);
 		}
 	}
